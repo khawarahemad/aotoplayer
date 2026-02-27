@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Auto Video Player",
+  "version": "3.0",
+  "description": "2x speed auto-player for GFG, YouTube, Udemy, Coursera. Injects into every frame including cross-origin video iframes.",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["*://*/*"],
+  "content_scripts": [
+    {
+      "matches": ["*://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}
