@@ -7,11 +7,12 @@ A lightweight browser extension that automatically plays videos at **2× speed**
 ## Features
 
 - **2× Playback Speed** — enforced continuously; resets if the site tries to change it.
+- **Article Auto-Complete** — automatically scrolls, finds the `Mark as Read` button, clicks it, and advances to the next article.
+- **Strict Course Navigation** — explicitly isolates automated playback to "Articles" and "Videos" tabs, intelligently skipping "Problems" and "Quizzes".
+- **Floating AutoPlay Toggle** — persistent button allowing immediate pausing/resuming of the script, saving its state locally.
 - **Auto-Advance** — detects when a video ends and clicks the "Next" / "Next Track" button automatically.
 - **Cross-Origin iframe Support** — injects into every frame (including sandboxed video iframes) via `all_frames: true`.
 - **Idle-Bypass Heartbeat** — simulates subtle pointer and keyboard activity so the page never marks you as idle.
-- **SPA / Next.js Compatible** — watches for URL changes and re-scans for new videos automatically.
-- **Hardware-Like Clicks** — dispatches full `PointerEvent` + `MouseEvent` chains to satisfy autoplay policies and site click guards.
 
 ---
 
@@ -43,16 +44,17 @@ manifest.json
 
 ### Flow
 
-```
+```text
 Page loads
   └─► content.js injected in every frame
-        ├─► scan() every 2 s → find largest visible <video>
-        │     └─► attachVideo()
-        │           ├─► set playbackRate = 2.0
-        │           ├─► hwClick + video.play()
-        │           └─► on 'ended' → requestNext()
-        │                 ├─► direct: clickNext(document) / parent / top
-        │                 └─► cross-origin fallback: postMessage → top → clickNext()
+        ├─► On New Track load: Switch to Articles tab -> Click first item
+        ├─► scan() every 2.5 s
+        │     ├─► If Article: smooth scroll -> 'Mark as Read' -> requestNext()
+        │     ├─► If Video: force 2× speed -> play -> on 'ended' -> wait 3s -> requestNext()
+        │     └─► If Problem/Quiz: Auto-skip via requestNext()
+        ├─► requestNext() intercept logic:
+        │     ├─► If end of Articles -> switch to Videos tab -> play first video
+        │     └─► If end of Videos -> click Next Track
         └─► idle heartbeat (top frame only, every 15 s)
 ```
 
