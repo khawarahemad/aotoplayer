@@ -22,6 +22,71 @@
   var SPEED     = 2.0;
   var IS_TOP    = (window === window.top);
 
+  /* ── State & UI ──────────────────────────────────────────── */
+  var apPaused = false;
+  var pauseBtn = null;
+
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get(['ap_paused'], function(res) {
+        if(res && res.ap_paused !== undefined) {
+          apPaused = res.ap_paused;
+          updateUIVisually();
+        }
+      });
+      chrome.storage.onChanged.addListener(function(changes) {
+        if(changes.ap_paused) {
+          apPaused = changes.ap_paused.newValue;
+          updateUIVisually();
+        }
+      });
+    }
+  } catch(e) {}
+
+  function togglePause() {
+    apPaused = !apPaused;
+    updateUIVisually();
+    try { if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) chrome.storage.local.set({ap_paused: apPaused}); } catch(e) {}
+  }
+
+  function updateUIVisually() {
+    if (!pauseBtn) return;
+    if (apPaused) {
+      pauseBtn.textContent = 'AutoPlay: OFF';
+      pauseBtn.style.backgroundColor = '#d32f2f';
+    } else {
+      pauseBtn.textContent = 'AutoPlay: ON';
+      pauseBtn.style.backgroundColor = '#388e3c';
+    }
+  }
+
+  if (IS_TOP) {
+    function createBtn() {
+      if (document.getElementById('ap-pause-btn')) return;
+      pauseBtn = document.createElement('button');
+      pauseBtn.id = 'ap-pause-btn';
+      pauseBtn.textContent = 'AutoPlay: ON';
+      Object.assign(pauseBtn.style, {
+        position: 'fixed', bottom: '20px', right: '20px', zIndex: '2147483647',
+        padding: '8px 12px', backgroundColor: '#388e3c', color: '#fff',
+        border: 'none', borderRadius: '4px', fontFamily: 'sans-serif',
+        fontSize: '13px', fontWeight: 'bold', cursor: 'pointer',
+        boxShadow: '0 2px 5px rgba(0,0,0,0.3)', opacity: '0.8',
+        transition: 'opacity 0.2s, background-color 0.2s'
+      });
+      pauseBtn.onmouseover = function() { pauseBtn.style.opacity = '1'; };
+      pauseBtn.onmouseout = function() { pauseBtn.style.opacity = '0.8'; };
+      pauseBtn.onclick = function(e) { e.preventDefault(); e.stopPropagation(); togglePause(); };
+      (document.body || document.documentElement).appendChild(pauseBtn);
+      updateUIVisually();
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', createBtn);
+    } else {
+      createBtn();
+    }
+  }
+
   /* ── detect whether this is a GFG top-level page ──────────
      Even when we run inside a cross-origin iframe we still need
      to know the HOST of the TOP frame to decide platform.        */
@@ -70,6 +135,7 @@
   /* ── Idle-bypass heartbeat (top frame only) ──────────────── */
   if (IS_TOP) {
     setInterval(function () {
+      if (apPaused) return; // Skip heartbeat if paused
       var x = Math.round(window.innerWidth  * (0.4 + Math.random() * 0.2));
       var y = Math.round(window.innerHeight * (0.4 + Math.random() * 0.2));
       document.body.dispatchEvent(new PointerEvent('pointermove', {
@@ -98,16 +164,15 @@
   function isNextVideoBtn(el) {
     if (!el || el.offsetParent === null) return false;
     var t = labelOf(el);
-    // Matches: "Next", "Next »", "Next >>", "Next Video", "Next Lesson", etc.
-    // Does NOT match "Next Track" (handled separately)
-    return /^next\s*(\u00BB|\u203A|>>|>)?\s*$/i.test(t) ||
-           /^next\s+(video|lesson|lecture|chapter|item)/i.test(t);
+    if (/^next\s*(\u00BB|\u203A|>>|>)?\s*$/i.test(t)) return true;
+    var clean = t.replace(/[^a-z]/gi, '').toLowerCase();
+    return ['nextvideo', 'nextlesson', 'nextlecture', 'nextchapter', 'nextitem'].indexOf(clean) !== -1;
   }
 
   function isNextTrackBtn(el) {
     if (!el || el.offsetParent === null) return false;
-    var t = labelOf(el);
-    return /next\s+track/i.test(t);
+    var clean = labelOf(el).replace(/[^a-z]/gi, '').toLowerCase();
+    return clean === 'nexttrack';
   }
 
   function findBtn(doc, testFn) {
@@ -115,7 +180,16 @@
     for (var i = 0; i < els.length; i++) {
       if (testFn(els[i])) return els[i];
     }
-    return null;
+    // Fallback: search all other elements, picking the deepest match
+    var all = doc.querySelectorAll('div, span, li, p');
+    var best = null;
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (testFn(el)) {
+        if (!best || best.contains(el)) best = el;
+      }
+    }
+    return best;
   }
 
   /* ── Navigate to next video, then next track if needed ───── */
@@ -123,18 +197,18 @@
     // 1. Try "Next video/lesson" button first
     var btn = findBtn(doc, isNextVideoBtn);
     if (btn) {
-      console.log('[AutoPlayer] clicking next-video btn:', labelOf(btn));
+      // console.log('[AutoPlayer] clicking next-video btn:', labelOf(btn));
       hwClick(btn);
       return true;
     }
     // 2. Fall back to "Next Track"
     btn = findBtn(doc, isNextTrackBtn);
     if (btn) {
-      console.log('[AutoPlayer] clicking next-track btn:', labelOf(btn));
+      // console.log('[AutoPlayer] clicking next-track btn:', labelOf(btn));
       hwClick(btn);
       return true;
     }
-    console.warn('[AutoPlayer] no Next button found in', doc.location ? doc.location.href : '?');
+    // console.warn('[AutoPlayer] no Next button found in', doc.location ? doc.location.href : '?');
     return false;
   }
 
@@ -156,7 +230,7 @@
   if (IS_TOP) {
     window.addEventListener('message', function (e) {
       if (e.data && e.data.type === MSG_NEXT) {
-        console.log('[AutoPlayer] top got MSG_NEXT from iframe');
+        // console.log('[AutoPlayer] top got MSG_NEXT from iframe');
         setTimeout(goNext, 1000);
       }
     });
@@ -180,6 +254,7 @@
   }
 
   function enforceSpeed(v) {
+    if (apPaused) return; // Skip speed force if paused
     try { if (Math.abs(v.playbackRate - SPEED) > 0.01) v.playbackRate = SPEED; } catch (e) {}
   }
 
@@ -187,7 +262,7 @@
     if (seen(video)) { enforceSpeed(video); return; }
     _seen.push(video);
 
-    console.log('[AutoPlayer] attached video in', location.href);
+    // console.log('[AutoPlayer] attached video in', location.href);
 
     enforceSpeed(video);
 
@@ -198,12 +273,13 @@
 
     // When video naturally ends → go next
     video.addEventListener('ended', function () {
-      console.log('[AutoPlayer] video ended → advance');
-      setTimeout(requestNext, 1500);
+      if (apPaused) return; // Skip next if paused
+      // console.log('[AutoPlayer] video ended → waiting 8s for progress API to fire before advance');
+      setTimeout(requestNext, 8000); // Increased from 1500 to 8000ms to allow tracking API to complete
     });
 
     // Play it (hardware click first to satisfy autoplay policy)
-    if (video.paused) {
+    if (video.paused && !apPaused) {
       hwClick(video);
       setTimeout(function () { video.play().catch(function () {}); }, 120);
     }
@@ -266,6 +342,6 @@
     }
   }).observe(document.documentElement, { childList: true, subtree: true });
 
-  console.log('[AutoPlayer] v3.1 | isTop:', IS_TOP, '| host:', HOST, '| topHost:', TOP_HOST);
+  // console.log('[AutoPlayer] v3.1 | isTop:', IS_TOP, '| host:', HOST, '| topHost:', TOP_HOST);
 
 })();
