@@ -33,6 +33,50 @@
     if (match) _currentTrackId = match[1];
   } catch(e) {}
 
+  function forceAllTab() {
+    if (apPaused) return;
+    var els = document.querySelectorAll('div, span, li, a');
+    var best = null;
+    for (var i = 0; i < els.length; i++) {
+        var t = (els[i].textContent || '').trim().toLowerCase();
+        if (t === 'all' && els[i].children.length <= 2) {
+            if (!best || best.contains(els[i])) best = els[i];
+        }
+    }
+    if (best && best.tagName !== 'SPAN') {
+        var cl = best.className || '';
+        // If it looks like a tab and isn't active
+        if (cl.indexOf('active') === -1) hwClick(best);
+    }
+  }
+
+  function checkNewTrack() {
+    if (apPaused || !_currentTrackId) return;
+    try {
+      var saved = sessionStorage.getItem('ap_last_track');
+      if (saved !== _currentTrackId) {
+        sessionStorage.setItem('ap_last_track', _currentTrackId);
+        console.log('[AutoPlayer] New track session detected, starting from top.');
+        forceAllTab();
+        setTimeout(function() {
+          var links = document.querySelectorAll('a[href*="/track/"]');
+          for (var i=0; i<links.length; i++) {
+            var isItem = links[i].href.indexOf('/article/') !== -1 || links[i].href.indexOf('/video/') !== -1;
+            var isNav = /next|prev|track/i.test(labelOf(links[i]));
+            if (isItem && !isNav) {
+               hwClick(links[i]);
+               break;
+            }
+          }
+        }, 1500);
+      }
+    } catch(e){}
+  }
+
+  if (IS_TOP) {
+    setTimeout(forceAllTab, 1500);
+    setTimeout(checkNewTrack, 2500);
+  }
 
   try {
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
@@ -366,41 +410,11 @@
     probeSameOriginIframes();
 
     if (!apPaused && IS_TOP) {
-      // 1. Force start from top (Articles) when a NEW track loads
-      var trackMatch = location.href.match(/\/track\/([^\/]+)/);
-      if (trackMatch) {
-        var trackId = trackMatch[1];
-        if (_currentTrackId && trackId !== _currentTrackId) {
-          _currentTrackId = trackId;
-          console.log('[AutoPlayer] New track detected:', trackId);
-          setTimeout(function() {
-            var allTab = findBtn(document, function(el) { return /^all$/i.test(labelOf(el)) && el.tagName !== 'SPAN'; });
-            if(allTab) { hwClick(allTab); }
-            
-            setTimeout(function() {
-              var links = document.querySelectorAll('a[href*="/track/"]');
-              for (var i=0; i<links.length; i++) {
-                var isItem = links[i].href.indexOf('/article/') !== -1 || links[i].href.indexOf('/video/') !== -1;
-                var isNav = /next|prev|track/i.test(labelOf(links[i]));
-                if (isItem && !isNav) {
-                   hwClick(links[i]);
-                   break;
-                }
-              }
-            }, 800);
-          }, 1500);
-          return;
-        } else if (!_currentTrackId) {
-          _currentTrackId = trackId;
-        }
-      }
-
-      // 2. Process article pages
+      // 1. Process article pages
       if (location.href.indexOf('/article/') !== -1 && location.href !== _articleHandledUrl) {
         handleArticleIfReady();
       }
-      
-      // 3. Auto-skip problems and quizzes (to not break the flow)
+      // 2. Auto-skip problems and quizzes (to not break the flow)
       else if ((location.href.indexOf('/problem/') !== -1 || location.href.indexOf('/quiz/') !== -1) && location.href !== _articleHandledUrl) {
         _articleHandledUrl = location.href;
         console.log('[AutoPlayer] Skipping non-media page:', location.href);
@@ -422,6 +436,15 @@
       _seen = [];
       _articleHandledUrl = null;
       if (_rateWatchTimer) { clearInterval(_rateWatchTimer); _rateWatchTimer = null; }
+      
+      // Track ID updates safely
+      try {
+        var match = location.href.match(/\/track\/([^\/]+)/);
+        if (match) _currentTrackId = match[1];
+      } catch(e) {}
+      
+      setTimeout(forceAllTab, 1000);
+      setTimeout(checkNewTrack, 1500);
       setTimeout(scan, 2500);
     }
   }).observe(document.documentElement, { childList: true, subtree: true });
