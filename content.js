@@ -26,6 +26,13 @@
   var apPaused = false;
   var pauseBtn = null;
   var _articleHandledUrl = null;
+  var _currentTrackId = null;
+
+  try {
+    var match = location.href.match(/\/track\/([^\/]+)/);
+    if (match) _currentTrackId = match[1];
+  } catch(e) {}
+
 
   try {
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
@@ -275,8 +282,8 @@
     // When video naturally ends → go next
     video.addEventListener('ended', function () {
       if (apPaused) return; // Skip next if paused
-      // console.log('[AutoPlayer] video ended → waiting 8s for progress API to fire before advance');
-      setTimeout(requestNext, 3000); // Increased from 1500 to 8000ms to allow tracking API to complete
+      // console.log('[AutoPlayer] video ended → waiting 3s for progress API to fire before advance');
+      setTimeout(requestNext, 3000); // Increased from 1500 to 3000ms to allow tracking API to complete
     });
 
     // Play it (hardware click first to satisfy autoplay policy)
@@ -358,9 +365,49 @@
     if (v) attachVideo(v);
     probeSameOriginIframes();
 
-    // Process article pages automatically
-    if (!apPaused && IS_TOP && location.href.indexOf('/article/') !== -1 && location.href !== _articleHandledUrl) {
-      handleArticleIfReady();
+    if (!apPaused && IS_TOP) {
+      // 1. Force start from top (Articles) when a NEW track loads
+      var trackMatch = location.href.match(/\/track\/([^\/]+)/);
+      if (trackMatch) {
+        var trackId = trackMatch[1];
+        if (_currentTrackId && trackId !== _currentTrackId) {
+          _currentTrackId = trackId;
+          console.log('[AutoPlayer] New track detected:', trackId);
+          setTimeout(function() {
+            var allTab = findBtn(document, function(el) { return /^all$/i.test(labelOf(el)) && el.tagName !== 'SPAN'; });
+            if(allTab) { hwClick(allTab); }
+            
+            setTimeout(function() {
+              var links = document.querySelectorAll('a[href*="/track/"]');
+              for (var i=0; i<links.length; i++) {
+                var isItem = links[i].href.indexOf('/article/') !== -1 || links[i].href.indexOf('/video/') !== -1;
+                var isNav = /next|prev|track/i.test(labelOf(links[i]));
+                if (isItem && !isNav) {
+                   hwClick(links[i]);
+                   break;
+                }
+              }
+            }, 800);
+          }, 1500);
+          return;
+        } else if (!_currentTrackId) {
+          _currentTrackId = trackId;
+        }
+      }
+
+      // 2. Process article pages
+      if (location.href.indexOf('/article/') !== -1 && location.href !== _articleHandledUrl) {
+        handleArticleIfReady();
+      }
+      
+      // 3. Auto-skip problems and quizzes (to not break the flow)
+      else if ((location.href.indexOf('/problem/') !== -1 || location.href.indexOf('/quiz/') !== -1) && location.href !== _articleHandledUrl) {
+        _articleHandledUrl = location.href;
+        console.log('[AutoPlayer] Skipping non-media page:', location.href);
+        setTimeout(function() {
+          if (!apPaused) requestNext();
+        }, 1500);
+      }
     }
   }
 
