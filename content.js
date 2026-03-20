@@ -28,26 +28,27 @@
   var _articleHandledUrl = null;
   var _currentTrackId = null;
 
-  try {
-    var match = location.href.match(/\/track\/([^\/]+)/);
-    if (match) _currentTrackId = match[1];
-  } catch(e) {}
+  var _hasSwitchedToVideos = false;
 
-  function forceAllTab() {
-    if (apPaused) return;
+  function clickSidebarTab(prefix) {
+    if (apPaused) return false;
     var els = document.querySelectorAll('div, span, li, a');
     var best = null;
     for (var i = 0; i < els.length; i++) {
         var t = (els[i].textContent || '').trim().toLowerCase();
-        if (t === 'all' && els[i].children.length <= 2) {
-            if (!best || best.contains(els[i])) best = els[i];
+        // starts with prefix and is roughly the same length or has (count)
+        if (t.indexOf(prefix) === 0 && (t.length === prefix.length || t.indexOf('(') !== -1)) {
+            if (els[i].children.length <= 3) {
+                if (!best || best.contains(els[i])) best = els[i];
+            }
         }
     }
     if (best && best.tagName !== 'SPAN') {
         var cl = best.className || '';
-        // If it looks like a tab and isn't active
         if (cl.indexOf('active') === -1) hwClick(best);
+        return true;
     }
+    return false;
   }
 
   function checkNewTrack() {
@@ -56,17 +57,22 @@
       var saved = sessionStorage.getItem('ap_last_track');
       if (saved !== _currentTrackId) {
         sessionStorage.setItem('ap_last_track', _currentTrackId);
-        console.log('[AutoPlayer] New track session detected, starting from top.');
-        forceAllTab();
+        console.log('[AutoPlayer] New track session detected, starting Articles.');
+        _hasSwitchedToVideos = false;
+        
+        clickSidebarTab('articles');
         setTimeout(function() {
-          var links = document.querySelectorAll('a[href*="/track/"]');
-          for (var i=0; i<links.length; i++) {
-            var isItem = links[i].href.indexOf('/article/') !== -1 || links[i].href.indexOf('/video/') !== -1;
-            var isNav = /next|prev|track/i.test(labelOf(links[i]));
-            if (isItem && !isNav) {
-               hwClick(links[i]);
-               break;
-            }
+          var aLinks = document.querySelectorAll('a[href*="/article/"]');
+          if (aLinks.length > 0) {
+             hwClick(aLinks[0]);
+          } else {
+             // Fallback to videos if no articles
+             _hasSwitchedToVideos = true;
+             clickSidebarTab('videos');
+             setTimeout(function() {
+                var vLinks = document.querySelectorAll('a[href*="/video/"]');
+                if (vLinks.length > 0) hwClick(vLinks[0]);
+             }, 1000);
           }
         }, 1500);
       }
@@ -74,7 +80,6 @@
   }
 
   if (IS_TOP) {
-    setTimeout(forceAllTab, 1500);
     setTimeout(checkNewTrack, 2500);
   }
 
@@ -249,18 +254,34 @@
     // 1. Try "Next video/lesson" button first
     var btn = findBtn(doc, isNextVideoBtn);
     if (btn) {
-      // console.log('[AutoPlayer] clicking next-video btn:', labelOf(btn));
       hwClick(btn);
       return true;
     }
-    // 2. Fall back to "Next Track"
-    btn = findBtn(doc, isNextTrackBtn);
+    
+    // 2. Intercept endpoints (Next Track, Go to Problems)
+    btn = findBtn(doc, isNextTrackBtn) || findBtn(doc, function(el) { return /^go\s+to\s+problems/i.test(labelOf(el)); });
     if (btn) {
-      // console.log('[AutoPlayer] clicking next-track btn:', labelOf(btn));
+      // If we are finishing Articles, switch to Videos instead of clicking the generic end button!
+      if (location.href.indexOf('/article/') !== -1 && !_hasSwitchedToVideos && IS_TOP) {
+          console.log('[AutoPlayer] End of Articles. Switching to Videos tab!');
+          _hasSwitchedToVideos = true;
+          clickSidebarTab('videos');
+          setTimeout(function() {
+              var vLinks = document.querySelectorAll('a[href*="/video/"]');
+              if (vLinks.length > 0) {
+                  hwClick(vLinks[0]); // Click first video
+              } else {
+                  hwClick(btn); // Fallback to Next Track if no videos exist
+              }
+          }, 1500);
+          return true;
+      }
+      
+      // Otherwise, standard click
       hwClick(btn);
       return true;
     }
-    // console.warn('[AutoPlayer] no Next button found in', doc.location ? doc.location.href : '?');
+    
     return false;
   }
 
@@ -443,7 +464,6 @@
         if (match) _currentTrackId = match[1];
       } catch(e) {}
       
-      setTimeout(forceAllTab, 1000);
       setTimeout(checkNewTrack, 1500);
       setTimeout(scan, 2500);
     }
