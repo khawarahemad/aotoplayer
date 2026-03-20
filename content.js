@@ -25,6 +25,7 @@
   /* ── State & UI ──────────────────────────────────────────── */
   var apPaused = false;
   var pauseBtn = null;
+  var _articleHandledUrl = null;
 
   try {
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
@@ -275,7 +276,7 @@
     video.addEventListener('ended', function () {
       if (apPaused) return; // Skip next if paused
       // console.log('[AutoPlayer] video ended → waiting 8s for progress API to fire before advance');
-      setTimeout(requestNext, 8000); // Increased from 1500 to 8000ms to allow tracking API to complete
+      setTimeout(requestNext, 3000); // Increased from 1500 to 8000ms to allow tracking API to complete
     });
 
     // Play it (hardware click first to satisfy autoplay policy)
@@ -322,10 +323,45 @@
   }
 
   /* ── Scan loop ───────────────────────────────────────────── */
+  function handleArticleIfReady() {
+    var markBtn = findBtn(document, function(el) { return /^mark\s+as\s+read$/i.test(labelOf(el)); });
+    var nextVBtn = findBtn(document, isNextVideoBtn);
+    var nextTBtn = findBtn(document, isNextTrackBtn);
+    
+    if (markBtn || nextVBtn || nextTBtn) {
+      _articleHandledUrl = location.href;
+      setTimeout(function() {
+        if (apPaused) return;
+        
+        // 1. Scroll to the bottom of the article smoothly
+        try { window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); } catch(e){}
+        
+        // 2. Wait for scroll, then click 'Mark as Read' if available
+        setTimeout(function() {
+          if (apPaused) return;
+          var mBtn = findBtn(document, function(el) { return /^mark\s+as\s+read$/i.test(labelOf(el)); });
+          if (mBtn) {
+            hwClick(mBtn);
+            // 3. Give API time to save progress, then proceed
+            setTimeout(function() { if (!apPaused) requestNext(); }, 2500);
+          } else {
+            // Already read or not available, just proceed after a short breather
+            setTimeout(function() { if (!apPaused) requestNext(); }, 1500);
+          }
+        }, 1500);
+      }, 1000); // initial landing delay
+    }
+  }
+
   function scan() {
     var v = getBestVideo();
     if (v) attachVideo(v);
     probeSameOriginIframes();
+
+    // Process article pages automatically
+    if (!apPaused && IS_TOP && location.href.indexOf('/article/') !== -1 && location.href !== _articleHandledUrl) {
+      handleArticleIfReady();
+    }
   }
 
   setInterval(scan, 2000);
@@ -337,6 +373,7 @@
     if (location.href !== _lastUrl) {
       _lastUrl = location.href;
       _seen = [];
+      _articleHandledUrl = null;
       if (_rateWatchTimer) { clearInterval(_rateWatchTimer); _rateWatchTimer = null; }
       setTimeout(scan, 2500);
     }
